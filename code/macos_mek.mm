@@ -7,13 +7,10 @@
 #include <sys/stat.h>
 #include <Carbon/Carbon.h>
 #include <arm_neon.h>
+#include <dlfcn.h> // dlsym
 
-#include "mek_types.h"
-#include "mek_platform.h"
-#include "mek_intrinsic.h"
+#include "mek_editor.cpp"
 
-#define STB_TRUETYPE_IMPLEMENTATION
-#include "stb_truetype.h"
 global b32 is_running;
 
 internal u64 
@@ -44,9 +41,9 @@ PLATFORM_READ_FILE(debug_macos_read_file)
     int Error = errno;
     if(File >= 0) // NOTE : If the open() succeded, the return value is non-negative value.
     {
-        struct stat FileStat;
-        fstat(File , &FileStat); 
-        off_t fileSize = FileStat.st_size;
+        struct stat file_stat;
+        fstat(File , &file_stat); 
+        off_t fileSize = file_stat.st_size;
 
         if(fileSize > 0)
         {
@@ -128,7 +125,40 @@ app_delegate : NSObject<NSApplicationDelegate>
 }\
 
 internal void
-macos_handle_event(NSApplication *app, NSWindow *window)
+macos_get_file_time(char *file_name)
+{
+    int file = open(file_name, O_RDONLY);
+
+    struct stat file_stat;
+    fstat(file , &file_stat); 
+
+    close(file);
+}
+
+struct macos_code
+{
+    void *library;
+    update_and_render_ *update_and_render;
+};
+
+internal void
+macos_get_code(macos_code *code, char *file_name)
+{
+    if(code->library)
+    {
+        dlclose(code->library);
+    }
+
+    code->library = dlopen(file_name, RTLD_LAZY);
+    if(code->library)
+    {
+        code->update_and_render = (update_and_render_ *)dlsym(code->library, "update_and_render");
+    }
+}
+
+
+internal void
+macos_handle_event(NSApplication *app, NSWindow *window, platform_input *input)
 {
 #if 0
     NSPoint mouse_location = [NSEvent mouseLocation];
@@ -208,41 +238,130 @@ macos_handle_event(NSApplication *app, NSWindow *window)
                         {
                             is_running = false;
                         }
-                        else if(key_code == kVK_ANSI_W)
+                        if(key_code == kVK_Delete)
                         {
+                            input->is_backspace_down = is_down;
                         }
                         else if(key_code == kVK_ANSI_A)
                         {
+                            input->is_a_down = is_down;
                         }
-                        else if(key_code == kVK_ANSI_S)
+                        else if(key_code == kVK_ANSI_B)
                         {
+                            input->is_b_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_C)
+                        {
+                            input->is_c_down = is_down;
                         }
                         else if(key_code == kVK_ANSI_D)
                         {
+                            input->is_d_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_E)
+                        {
+                            input->is_e_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_F)
+                        {
+                            input->is_f_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_G)
+                        {
+                            input->is_g_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_H)
+                        {
+                            input->is_h_down = is_down;
                         }
                         else if(key_code == kVK_ANSI_I)
                         {
+                            input->is_i_down = is_down;
                         }
                         else if(key_code == kVK_ANSI_J)
                         {
+                            input->is_j_down = is_down;
                         }
                         else if(key_code == kVK_ANSI_K)
                         {
+                            input->is_k_down = is_down;
                         }
                         else if(key_code == kVK_ANSI_L)
                         {
+                            input->is_l_down = is_down;
                         }
+                        else if(key_code == kVK_ANSI_M)
+                        {
+                            input->is_m_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_N)
+                        {
+                            input->is_n_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_O)
+                        {
+                            input->is_o_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_P)
+                        {
+                            input->is_p_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_Q)
+                        {
+                            input->is_q_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_R)
+                        {
+                            input->is_r_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_S)
+                        {
+                            input->is_s_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_T)
+                        {
+                            input->is_t_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_U)
+                        {
+                            input->is_u_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_V)
+                        {
+                            input->is_v_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_W)
+                        {
+                            input->is_w_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_X)
+                        {
+                            input->is_w_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_Y)
+                        {
+                            input->is_y_down = is_down;
+                        }
+                        else if(key_code == kVK_ANSI_Z)
+                        {
+                            input->is_z_down = is_down;
+                        }
+
                         else if(key_code == kVK_LeftArrow)
                         {
+                            input->is_arrow_left_down = is_down;
                         }
                         else if(key_code == kVK_RightArrow)
                         {
+                            input->is_arrow_right_down = is_down;
                         }
                         else if(key_code == kVK_UpArrow)
                         {
+                            input->is_arrow_up_down = is_down;
                         }
                         else if(key_code == kVK_DownArrow)
                         {
+                            input->is_arrow_down_down = is_down;
                         }
                         else if(key_code == kVK_Return)
                         {
@@ -297,10 +416,10 @@ struct bmp_file_header
 };
 #pragma pack(pop)
 
-internal file_buffer
-debug_macos_read_file_with_extra_memory(char *file_name)
+internal 
+PLATFORM_READ_FILE_WITH_EXTRA_MEMORY(debug_macos_read_file_with_extra_memory)
 {
-    file_buffer result = {};
+    platform_read_file_with_extra_memory_result result = {};
 
     // TODO(joon) Research more about the options for more smoooooth experience
     int file = open(file_name, O_RDWR, S_IRWXU);
@@ -315,9 +434,10 @@ debug_macos_read_file_with_extra_memory(char *file_name)
         {
             // TODO/Joon : no more os level memory allocation?
             // TODO(joon): how much extra bytes? What should happen if the file size is really big?
-            result.actual_size = file_size;
             result.size = 2.0f*file_size;
             result.memory = (u8 *)malloc(result.size);
+            zero_memory(result.memory, result.size);
+
             if(read(file, result.memory, file_size) == -1)
             {
                 free(result.memory);
@@ -344,12 +464,15 @@ macos_resize_window(offscreen_buffer *offscreen_buffer, u32 width, u32 height)
     offscreen_buffer->stride = sizeof(u32)*offscreen_buffer->width;
 
     offscreen_buffer->memory =  (u8 *)malloc(offscreen_buffer->height * offscreen_buffer->stride);
-
 }
     
 int 
 main(void)
 { 
+    platform_api platform_api = {};
+    platform_api.read_file = debug_macos_read_file;
+    platform_api.write_entire_file = debug_macos_write_entire_file;
+    platform_api.read_file_with_extra_memory = debug_macos_read_file_with_extra_memory;
     srand((u32)time(NULL));
 
     struct mach_timebase_info mach_time_info;
@@ -369,6 +492,7 @@ main(void)
     platform_memory.permanent_memory_size = gigabytes(1);
     platform_memory.transient_memory_size = gigabytes(3);
     u64 total_size = platform_memory.permanent_memory_size + platform_memory.transient_memory_size;
+    // NOTE(joon) automatically zeroed out
     vm_allocate(mach_task_self(), 
                 (vm_address_t *)&platform_memory.permanent_memory,
                 total_size, 
@@ -380,20 +504,9 @@ main(void)
 
     platform_memory.transient_memory = (u8 *)platform_memory.permanent_memory + platform_memory.permanent_memory_size;
 
+    //macos_code code = {};
+    //macos_get_code(code, "/Volumes/meka/mek_editor/data/test.bmp");
 
-    u32 font_bitmap_width = 512;
-    u32 font_bitmap_height = 512;
-    u8 *font_bitmap = (u8 *)malloc(sizeof(u8) * font_bitmap_width * font_bitmap_height);
-    u32 glyph_count = 256; // TODO(joon) Only supports ascii for now
-
-    // TODO(joon) replace stb with my own font loader?
-    stbtt_bakedchar *glyph_infos = (stbtt_bakedchar *)malloc(sizeof(stbtt_bakedchar) * glyph_count);
-    platform_read_file_result font = debug_macos_read_file("/Users/mekalopo/Library/Fonts/InputMonoCompressed-Light.ttf");
-    int result = stbtt_BakeFontBitmap((unsigned char *)font.memory, 0,
-                                        50.0f, // TODO(joon) This does not correspond to the actual pixel size, but to get higher pixel density, we need to crank this up
-                                        (unsigned char *)font_bitmap, font_bitmap_width, font_bitmap_height,
-                                        0, glyph_count,
-                                        glyph_infos);
 
 #if 0
     u32 result_bitmap_size = sizeof(bmp_file_header) + 
@@ -420,7 +533,6 @@ main(void)
     bmp_header->blue_mask = 0x000000ff;
     bmp_header->alpha_mask = 0xff000000;
 
-
     u8 *row = result_bitmap + sizeof(bmp_file_header);
     u32 stride = sizeof(u32) * font_bitmap_width;
     for(u32 y = 0;
@@ -445,7 +557,6 @@ main(void)
     debug_macos_write_entire_file("/Volumes/meka/mek_editor/data/test.bmp", (void *)result_bitmap, result_bitmap_size);
 #endif
 
-
     NSApplication *app = [NSApplication sharedApplication];
     [app setActivationPolicy :NSApplicationActivationPolicyRegular];
     app_delegate *delegate = [app_delegate new];
@@ -465,8 +576,8 @@ main(void)
 
     // TODO(joon): when connected to the external display, this should be window_width and window_height
     // but if not, this should be window_width/2 and window_height/2. Why?
-    //NSRect window_rect = NSMakeRect(100.0f, 100.0f, (r32)window_width, (r32)window_height);
-    NSRect window_rect = NSMakeRect(100.0f, 100.0f, (r32)window_width/2.0f, (r32)window_height/2.0f);
+    NSRect window_rect = NSMakeRect(100.0f, 100.0f, (r32)window_width, (r32)window_height);
+    //NSRect window_rect = NSMakeRect(100.0f, 100.0f, (r32)window_width/2.0f, (r32)window_height/2.0f);
 
     NSWindow *window = [[NSWindow alloc] initWithContentRect : window_rect
                                         // Apple window styles : https://developer.apple.com/documentation/appkit/nswindow/stylemask
@@ -517,7 +628,6 @@ main(void)
 
     id<MTLTexture> output_texture = [device newTextureWithDescriptor:texture_desc];
 
-
 #if 0
     CVDisplayLinkRef display_link;
     if(CVDisplayLinkCreateWithActiveCGDisplays(&display_link)== kCVReturnSuccess)
@@ -531,136 +641,18 @@ main(void)
     [app run];
 
     editor_state editor_state = {};
-    editor_state.opened_file = debug_macos_read_file_with_extra_memory("/Volumes/meka/mek_editor/data/test.cpp");
 
     u64 last_time = mach_absolute_time();
     is_running = true;
 
+    // TODO(joon) works for now, but might need more robust input system
+    platform_input input = {};
     while(is_running)
     {
-        macos_handle_event(app, window);
+        macos_handle_event(app, window, &input);
 
-        // TODO(joon) how to adjust width based on height
-        u32 glyph_grid_height = 40;
-        u32 glyph_grid_width = glyph_grid_height/2;
-
-        u32 first_glyph_grid_offset_x = 0; 
-        u32 first_glyph_grid_offset_y = 0; 
-
-
-        //u32 glyph_grid_count_x = offscreen_buffer.width / glyph_grid_width;
-        ///u32 glyph_grid_count_y = offscreen_buffer.height / glyph_grid_height;
-
-#if 1
-        // NOTE(joon) draw pixel grid
-        {
-            u8 *row = offscreen_buffer.memory + 
-                            offscreen_buffer.stride * first_glyph_grid_offset_y + 
-                            sizeof(u32) * first_glyph_grid_offset_x;
-            for(u32 y = 0;
-                    y < offscreen_buffer.height;
-                    ++y)
-            {
-                u32 *pixel = (u32 *)row;
-                for(u32 x = 0;
-                    x < offscreen_buffer.width;
-                    ++x)
-                {
-                    if(x % glyph_grid_width == 0 || x % glyph_grid_width == glyph_grid_width - 1 ||
-                        y % glyph_grid_height == 0 || y % glyph_grid_height == glyph_grid_height - 1)
-                    {
-                        *pixel = 0x701654;
-                    }
-
-                    pixel++;
-                }
-
-                row += offscreen_buffer.stride;
-            }
-        }
-#endif
-
-        u32 glyph_grid_x = 0;
-        u32 glyph_grid_y = 0;
-        // NOTE(joon) one character should be one byte
-        for(u32 char_index = 0;
-                char_index < editor_state.opened_file.size;
-                ++char_index)
-        {
-            u8 character = editor_state.opened_file.memory[char_index];
-            if(character == '\r' || character == '\n')
-            {
-                glyph_grid_x = 0;
-                glyph_grid_y++;
-            }
-            else
-            {
-                if(character == '"')
-                {
-                    int breakhere = 0;
-                }
-                // TODO(joon) how to properly get the glyph index?
-                stbtt_bakedchar *glyph_info = glyph_infos + character;
-
-                u32 glyph_width = glyph_info->x1 - glyph_info->x0;
-                u32 glyph_height = glyph_info->y1 - glyph_info->y0;
-
-                // TODO(joon) Also take account of kernel(bearing) to decide where to start
-                u32 min_x = first_glyph_grid_offset_x + glyph_grid_width * glyph_grid_x;
-                u32 min_y = first_glyph_grid_offset_y + glyph_grid_height * glyph_grid_y;
-
-                u32 one_past_max_x = min_x + glyph_grid_width;
-                if(one_past_max_x > offscreen_buffer.width)
-                {
-                    one_past_max_x = offscreen_buffer.width;
-                }
-                u32 one_past_max_y = min_y + glyph_grid_height;
-                if(one_past_max_y > offscreen_buffer.height)
-                {
-                    one_past_max_y = offscreen_buffer.height;
-                }
-
-                u32 draw_width = one_past_max_x - min_x;
-                u32 draw_height = one_past_max_y - min_y;
-
-                u8 *row = offscreen_buffer.memory + 
-                            offscreen_buffer.stride * min_y + 
-                            sizeof(u32) * min_x;
-                for(u32 y = 0;
-                        y < draw_height;
-                        ++y)
-                {
-                    u32 *pixel = (u32 *)row;
-                    for(u32 x = 0;
-                            x < draw_width;
-                            ++x)
-                    {
-                        // TODO(joon) We won't be having this problem, if we have evenly sized font bitmap
-                        // TODO(joon) This does seem like a hack, and does not properly work with y,p... etc
-                        u32 glyph_and_grid_height_diff = glyph_grid_height - glyph_height;
-                        f32 tex_x = (f32)x/(f32)glyph_width;
-                        // TODO(joon) Out of bounds, is y is smaller than the diff
-                        f32 tex_y = (f32)(y - glyph_and_grid_height_diff)/(f32)glyph_height;
-
-                        if(tex_x >= 0.0f && tex_x <= 1.0f &&
-                            tex_y >= 0.0f && tex_y <= 1.0f)
-                        {
-                            u32 sample_x = glyph_info->x0 + round_f32_to_u32(glyph_width * tex_x);
-                            u32 sample_y = glyph_info->y0 + round_f32_to_u32(glyph_height * tex_y);
-
-                            *pixel = 0xff000000 | ((font_bitmap[sample_y * font_bitmap_width + sample_x]) << 16);
-                        }
-
-                        pixel++;
-                    }
-
-
-                    row += offscreen_buffer.stride;
-                }
-
-                ++glyph_grid_x;
-            }
-        }
+        //if(code->file_name)
+        update_and_render(&platform_memory, &offscreen_buffer, &platform_api, &input);
 
         // NOTE(joon) update the output buffer with offscreen buffer
         MTLRegion region = 

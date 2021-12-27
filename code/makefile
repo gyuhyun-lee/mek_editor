@@ -30,6 +30,9 @@ make_app :
 compile_main : $(MAIN_CODE_PATH)/macos_mek.mm
 	$(COMPILER) $(ARCHITECTURE) $(COMPILER_FLAGS) $(COMPILER_IGNORE_WARNINGS)  $(MACOS_FRAMEWORK) -o $(MACOS_EXE_PATH)/mek_editor $(MAIN_CODE_PATH)/macos_mek.mm 
 
+#compile_main : $(MAIN_CODE_PATH)/macos_mek.mm
+	#$(COMPILER) $(ARCHITECTURE) $(COMPILER_FLAGS) $(COMPILER_IGNORE_WARNINGS) -o $(MACOS_EXE_PATH)/mek_editor $(MAIN_CODE_PATH)/mek_editor.cpp 
+
 #clean all the object files.
 cleanup : 
 	rm -rf *.o 

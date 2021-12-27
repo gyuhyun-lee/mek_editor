@@ -25,11 +25,21 @@ struct platform_read_file_result
     u64 size; // TOOD/joon : make this to be at least 64bit
 };
 
+struct platform_read_file_with_extra_memory_result
+{
+    // TODO(joon) This needs to be adjusted, if the user writes more than the buffer size
+    u32 size; // size that we allocate
+    u8 *memory;
+};
+
 #define PLATFORM_GET_FILE_SIZE(name) u64 (name)(char *filename)
 typedef PLATFORM_GET_FILE_SIZE(platform_get_file_size);
 
 #define PLATFORM_READ_FILE(name) platform_read_file_result (name)(char *filename)
 typedef PLATFORM_READ_FILE(platform_read_file);
+
+#define PLATFORM_READ_FILE_WITH_EXTRA_MEMORY(name) platform_read_file_with_extra_memory_result (name)(char *file_name)
+typedef PLATFORM_READ_FILE_WITH_EXTRA_MEMORY(platform_read_file_with_extra_memory);
 
 #define PLATFORM_WRITE_ENTIRE_FILE(name) void (name)(char *file_name, void *memory_to_write, u32 size)
 typedef PLATFORM_WRITE_ENTIRE_FILE(platform_write_entire_file);
@@ -42,6 +52,8 @@ struct platform_api
     platform_read_file *read_file;
     platform_write_entire_file *write_entire_file;
     platform_free_file_memory *free_file_memory;
+
+    platform_read_file_with_extra_memory *read_file_with_extra_memory;
 };
 
 struct platform_memory
@@ -74,22 +86,51 @@ struct offscreen_buffer
     u8 *memory;
 };
 
-// NOTE(joon) Where we keep the read file
-// NOTE(joon): .swp like vim?
-struct file_buffer
+/*
+   NOTE(joon)
+   How we wil l
+*/
+
+struct platform_input
 {
-    // TODO(joon) u32 should be good enough... if the user don't try to open a source code(or a file) that is bigger than 4GB
-    u32 actual_size; // actual size that we write when we save the file
-    // TODO(joon) This needs to be adjusted, if the user writes more than the buffer size
-    u32 size; // size that we allocate
-    u8 *memory;
+    b32 is_a_down;
+    b32 is_b_down;
+    b32 is_c_down;
+    b32 is_d_down;
+    b32 is_e_down;
+    b32 is_f_down;
+    b32 is_g_down;
+    b32 is_h_down;
+    b32 is_i_down;
+    b32 is_j_down;
+    b32 is_k_down;
+    b32 is_l_down;
+    b32 is_m_down;
+    b32 is_n_down;
+    b32 is_o_down;
+    b32 is_p_down;
+    b32 is_q_down;
+    b32 is_r_down;
+    b32 is_s_down;
+    b32 is_t_down;
+    b32 is_u_down;
+    b32 is_v_down;
+    b32 is_w_down;
+    b32 is_x_down;
+    b32 is_y_down;
+    b32 is_z_down;
+
+    b32 is_arrow_right_down;
+    b32 is_arrow_left_down;
+    b32 is_arrow_up_down;
+    b32 is_arrow_down_down;
+
+
+    b32 is_backspace_down;
 };
 
-struct editor_state
-{
-    // NOTE(joon) Eventually turn into some kind of linked list, to open multiple files
-    file_buffer opened_file;
-};
+#define UPDATE_AND_RENDER(name) void (name)(platform_memory *memory, offscreen_buffer *offscreen_buffer, platform_api *platform_api, platform_input *input)
+typedef UPDATE_AND_RENDER(update_and_render_);
 
 // TODO/Joon: intrinsic zero memory?
 // TODO(joon): can be faster using wider vectors
