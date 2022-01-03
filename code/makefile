@@ -14,7 +14,7 @@ MACOS_EXE_PATH = $(MACOS_BUILD_PATH)/$(MACOS_APP_NAME)/Contents/MacOS
 MACOS_RESOURCE_PATH = $(MACOS_BUILD_PATH)/$(MACOS_APP_NAME)/Contents/Resources
 MACOS_FRAMEWORK = -framework cocoa -framework corefoundation -framework coregraphics -framework corevideo -framework metal -framework metalkit 
 
-all : make_directory make_app compile_main cleanup
+all : make_directory make_app create_lock compile_platform delete_lock compile_main cleanup
 
 make_directory : 
 	mkdir -p $(MACOS_BUILD_PATH)
@@ -25,13 +25,19 @@ make_app :
 	mkdir -p $(MACOS_BUILD_PATH)/$(MACOS_APP_NAME)/Contents/Resources
 	mkdir -p $(MACOS_BUILD_PATH)/$(MACOS_APP_NAME)/Contents/MacOS
 
+create_lock :
+	touch $(MACOS_RESOURCE_PATH)/mek_editor.lock
+
 # target:  dependency1 dependency2 ...
 #       <tab> command
-compile_main : $(MAIN_CODE_PATH)/macos_mek.mm
-	$(COMPILER) $(ARCHITECTURE) $(COMPILER_FLAGS) $(COMPILER_IGNORE_WARNINGS)  $(MACOS_FRAMEWORK) -o $(MACOS_EXE_PATH)/mek_editor $(MAIN_CODE_PATH)/macos_mek.mm 
+compile_platform : 
+	$(COMPILER) $(ARCHITECTURE) $(COMPILER_FLAGS) -dynamiclib $(COMPILER_IGNORE_WARNINGS) -o $(MACOS_RESOURCE_PATH)/mek_editor.dylib $(MAIN_CODE_PATH)/mek_editor.cpp 
 
-#compile_main : $(MAIN_CODE_PATH)/macos_mek.mm
-	#$(COMPILER) $(ARCHITECTURE) $(COMPILER_FLAGS) $(COMPILER_IGNORE_WARNINGS) -o $(MACOS_EXE_PATH)/mek_editor $(MAIN_CODE_PATH)/mek_editor.cpp 
+delete_lock :
+	rm $(MACOS_RESOURCE_PATH)/mek_editor.lock
+
+compile_main : 
+	$(COMPILER) $(ARCHITECTURE) $(COMPILER_FLAGS) $(COMPILER_IGNORE_WARNINGS) $(MACOS_FRAMEWORK) -o $(MACOS_EXE_PATH)/mek_editor $(MAIN_CODE_PATH)/macos_mek.mm
 
 #clean all the object files.
 cleanup : 

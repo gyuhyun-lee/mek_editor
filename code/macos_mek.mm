@@ -8,10 +8,11 @@
 #include <Carbon/Carbon.h>
 #include <arm_neon.h>
 #include <dlfcn.h> // dlsym
+#include <mach-o/dyld.h> // _NSGetExecutablePath
+#include <copyfile.h> // 
 
-#include "mek_editor.cpp"
-
-global b32 is_running;
+#include "mek_types.h"
+#include "mek_platform.h"
 
 internal u64 
 mach_time_diff_in_nano_seconds(u64 begin, u64 end, r32 nano_seconds_per_tick)
@@ -25,10 +26,13 @@ PLATFORM_GET_FILE_SIZE(macos_get_file_size)
     u64 result = 0;
 
     int file = open(filename, O_RDONLY);
-    struct stat file_stat;
-    fstat(file , &file_stat); 
-    result = file_stat.st_size;
-    close(file);
+    if(file >= 0)
+    {
+        struct stat file_stat;
+        fstat(file , &file_stat); 
+        result = file_stat.st_size;
+        close(file);
+    }
 
     return result;
 }
@@ -60,16 +64,22 @@ PLATFORM_READ_FILE(debug_macos_read_file)
         close(File);
     }
 
+    assert(Result.memory);
+
     return Result;
 }
 
+
 PLATFORM_WRITE_ENTIRE_FILE(debug_macos_write_entire_file)
 {
-    int file = open(file_name, O_WRONLY|O_CREAT|O_TRUNC, S_IRWXU);
+    int file = open(file_name, O_WRONLY|O_CREAT|O_TRUNC, S_IRWXO);
 
     if(file >= 0) 
     {
-        if(write(file, memory_to_write, size) == -1)
+        if(write(file, memory_to_write, size) == size)
+        {
+        }
+        else
         {
             // TODO(joon) : LOG here
         }
@@ -86,6 +96,17 @@ PLATFORM_WRITE_ENTIRE_FILE(debug_macos_write_entire_file)
 PLATFORM_FREE_FILE_MEMORY(debug_macos_free_file_memory)
 {
     free(memory);
+}
+
+// TODO(joon) Posix does not have utility function such as CopyFile from windows.. any way to make this cleaner?
+internal void
+macos_copy_file(char *dest_file_name, char *source_file_name)
+{
+    copyfile_state_t state = copyfile_state_alloc();
+    int result = copyfile(source_file_name, dest_file_name, state, COPYFILE_ALL);
+    copyfile_state_free(state);
+
+    assert(result == 0);
 }
 
 @interface 
@@ -124,38 +145,63 @@ app_delegate : NSObject<NSApplicationDelegate>
     }\
 }\
 
-internal void
-macos_get_file_time(char *file_name)
+internal u64
+macos_get_file_last_modified_time(char *file_name)
 {
-    int file = open(file_name, O_RDONLY);
-
     struct stat file_stat;
-    fstat(file , &file_stat); 
+    stat(file_name , &file_stat); 
 
-    close(file);
+    u64 result = file_stat.st_mtime;
+
+    return result;
 }
 
 struct macos_code
 {
     void *library;
     update_and_render_ *update_and_render;
+    
+    u64 last_modified_time;
 };
 
 internal void
-macos_get_code(macos_code *code, char *file_name)
+macos_get_code(macos_code *code, char *lib_name, char *copy_lib_name)
 {
+#if 1
     if(code->library)
     {
+        // TODO(joon) If we don't use dlclose, the memory will still be present inside the memory - 
+        // which causes dlopen to reuse that instead of opening a new library. What happens to the string constants that are relative to the dylib?
         dlclose(code->library);
     }
+#else
+    code->library = 0;
+    code->update_and_render = 0;
+#endif
 
-    code->library = dlopen(file_name, RTLD_LAZY);
+    //macos_copy_file(copy_lib_name, lib_name);
+
+    code->library = dlopen(lib_name, RTLD_LAZY|RTLD_GLOBAL);
     if(code->library)
     {
         code->update_and_render = (update_and_render_ *)dlsym(code->library, "update_and_render");
+        code->last_modified_time = macos_get_file_last_modified_time(lib_name);
     }
+
+    assert(code->update_and_render);
 }
 
+internal void
+change_virtual_key_state(virtual_key *key, b32 is_down)
+{
+    if(key->ended_down != is_down)
+    {
+        key->state_change_count++;
+        key->time_passed = 0.0f;
+    }
+
+    key->ended_down = is_down;
+}
 
 internal void
 macos_handle_event(NSApplication *app, NSWindow *window, platform_input *input)
@@ -227,150 +273,623 @@ macos_handle_event(NSApplication *app, NSWindow *window, platform_input *input)
                 case NSEventTypeKeyUp:
                 case NSEventTypeKeyDown:
                 {
+                    //printf("isDown : %d, WasDown : %d", is_down, was_down);
+                    u16 key_code = [event keyCode];
+
+                    NSEventModifierFlags modifiers = [event modifierFlags];
+
+                    // NOTE(joon) One nice perk about this is that the key repeat is automatically handled by the OS
+                    // meaning, the event will not even happen if the key hold does not pass certain threshold
                     b32 was_down = event.ARepeat;
                     b32 is_down = ([event type] == NSEventTypeKeyDown);
-
-                    if((is_down != was_down) || !is_down)
+                    if(is_down)
                     {
-                        //printf("isDown : %d, WasDown : %d", is_down, was_down);
-                        u16 key_code = [event keyCode];
-                        if(key_code == kVK_Escape)
+                        b32 is_shift_down = (modifiers & NSEventModifierFlagShift);
+
+                        input_stream_key *key = input->stream + input->stream_write_index;
+
+                        input->stream_write_index = (input->stream_write_index + 1)%array_count(input->stream);
+                        if(key_code == kVK_ANSI_A)
                         {
-                            is_running = false;
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'A';
+                            }
+                            else
+                            {
+                                key->keycode = 'a';
+                            }
                         }
-                        if(key_code == kVK_Delete)
-                        {
-                            input->is_backspace_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_A)
-                        {
-                            input->is_a_down = is_down;
-                        }
+
                         else if(key_code == kVK_ANSI_B)
                         {
-                            input->is_b_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_C)
-                        {
-                            input->is_c_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_D)
-                        {
-                            input->is_d_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_E)
-                        {
-                            input->is_e_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_F)
-                        {
-                            input->is_f_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_G)
-                        {
-                            input->is_g_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_H)
-                        {
-                            input->is_h_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_I)
-                        {
-                            input->is_i_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_J)
-                        {
-                            input->is_j_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_K)
-                        {
-                            input->is_k_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_L)
-                        {
-                            input->is_l_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_M)
-                        {
-                            input->is_m_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_N)
-                        {
-                            input->is_n_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_O)
-                        {
-                            input->is_o_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_P)
-                        {
-                            input->is_p_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_Q)
-                        {
-                            input->is_q_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_R)
-                        {
-                            input->is_r_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_S)
-                        {
-                            input->is_s_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_T)
-                        {
-                            input->is_t_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_U)
-                        {
-                            input->is_u_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_V)
-                        {
-                            input->is_v_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_W)
-                        {
-                            input->is_w_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_X)
-                        {
-                            input->is_w_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_Y)
-                        {
-                            input->is_y_down = is_down;
-                        }
-                        else if(key_code == kVK_ANSI_Z)
-                        {
-                            input->is_z_down = is_down;
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'B';
+                            }
+                            else
+                            {
+                                key->keycode = 'b';
+                            }
                         }
 
+                        else if(key_code == kVK_ANSI_C)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'C';
+                            }
+                            else
+                            {
+                                key->keycode = 'c';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_D)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'D';
+                            }
+                            else
+                            {
+                                key->keycode = 'd';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_E)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'E';
+                            }
+                            else
+                            {
+                                key->keycode = 'e';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_F)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'F';
+                            }
+                            else
+                            {
+                                key->keycode = 'f';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_G)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'G';
+                            }
+                            else
+                            {
+                                key->keycode = 'g';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_H)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'H';
+                            }
+                            else
+                            {
+                                key->keycode = 'h';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_I)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'I';
+                            }
+                            else
+                            {
+                                key->keycode = 'i';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_J)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'J';
+                            }
+                            else
+                            {
+                                key->keycode = 'j';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_K)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'K';
+                            }
+                            else
+                            {
+                                key->keycode = 'k';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_L)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'L';
+                            }
+                            else
+                            {
+                                key->keycode = 'l';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_M)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'M';
+                            }
+                            else
+                            {
+                                key->keycode = 'm';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_N)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'N';
+                            }
+                            else
+                            {
+                                key->keycode = 'n';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_O)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'O';
+                            }
+                            else
+                            {
+                                key->keycode = 'o';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_P)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'P';
+                            }
+                            else
+                            {
+                                key->keycode = 'p';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_Q)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'Q';
+                            }
+                            else
+                            {
+                                key->keycode = 'q';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_R)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'R';
+                            }
+                            else
+                            {
+                                key->keycode = 'r';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_S)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'S';
+                            }
+                            else
+                            {
+                                key->keycode = 's';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_T)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'T';
+                            }
+                            else
+                            {
+                                key->keycode = 't';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_U)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'U';
+                            }
+                            else
+                            {
+                                key->keycode = 'u';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_V)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'V';
+                            }
+                            else
+                            {
+                                key->keycode = 'v';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_W)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'W';
+                            }
+                            else
+                            {
+                                key->keycode = 'w';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_X)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'X';
+                            }
+                            else
+                            {
+                                key->keycode = 'x';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_Y)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'Y';
+                            }
+                            else
+                            {
+                                key->keycode = 'y';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_Z)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = 'Z';
+                            }
+                            else
+                            {
+                                key->keycode = 'z';
+                            }
+                        }
+                        
+                        else if(key_code == kVK_ANSI_1)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '!';
+                            }
+                            else
+                            {
+                                key->keycode = '1';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_2)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '@';
+                            }
+                            else
+                            {
+                                key->keycode = '2';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_3)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '#';
+                            }
+                            else
+                            {
+                                key->keycode = '3';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_4)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '$';
+                            }
+                            else
+                            {
+                                key->keycode = '4';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_5)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '%';
+                            }
+                            else
+                            {
+                                key->keycode = '5';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_6)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '^';
+                            }
+                            else
+                            {
+                                key->keycode = '6';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_7)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '&';
+                            }
+                            else
+                            {
+                                key->keycode = '7';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_8)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '*';
+                            }
+                            else
+                            {
+                                key->keycode = '8';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_9)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '(';
+                            }
+                            else
+                            {
+                                key->keycode = '9';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_0)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = ')';
+                            }
+                            else
+                            {
+                                key->keycode = '0';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_Slash)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '?';
+                            }
+                            else
+                            {
+                                key->keycode = '/';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_Comma)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '<';
+                            }
+                            else
+                            {
+                                key->keycode = ',';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_Period)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '>';
+                            }
+                            else
+                            {
+                                key->keycode = '.';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_Equal)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '+';
+                            }
+                            else
+                            {
+                                key->keycode = '=';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_Minus)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '_';
+                            }
+                            else
+                            {
+                                key->keycode = '-';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_Semicolon)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = ':';
+                            }
+                            else
+                            {
+                                key->keycode = ';';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_Backslash)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '|';
+                            }
+                            else
+                            {
+                                key->keycode = '\\';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_Quote)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '"';
+                            }
+                            else
+                            {
+                                key->keycode = '\'';
+                            }
+                        }
+
+                        else if(key_code == kVK_ANSI_Grave)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '~';
+                            }
+                            else
+                            {
+                                key->keycode = '`';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_LeftBracket)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '{';
+                            }
+                            else
+                            {
+                                key->keycode = '[';
+                            }
+                        }                        
+
+                        else if(key_code == kVK_ANSI_RightBracket)
+                        {
+                            if(is_shift_down)
+                            {
+                                key->keycode = '}';
+                            }
+                            else
+                            {
+                                key->keycode = ']';
+                            }
+                        }
+
+// TODO(joon) there are no arrow charcters in ascii codes, we need to specify whatever charcter code that we don't use as arrows  
+#if 0
                         else if(key_code == kVK_LeftArrow)
                         {
-                            input->is_arrow_left_down = is_down;
                         }
+
                         else if(key_code == kVK_RightArrow)
                         {
-                            input->is_arrow_right_down = is_down;
                         }
+
                         else if(key_code == kVK_UpArrow)
                         {
-                            input->is_arrow_up_down = is_down;
                         }
+
                         else if(key_code == kVK_DownArrow)
                         {
-                            input->is_arrow_down_down = is_down;
                         }
+#endif
+                        // TOOD(joon) shift modifier?
+                        else if(key_code == kVK_Escape)
+                        {
+                            key->keycode = 27; 
+                        }
+
+                        else if(key_code == kVK_Delete)
+                        {
+                            key->keycode = '\b'; 
+                        }
+
                         else if(key_code == kVK_Return)
                         {
-                            if(is_down)
-                            {
-                                NSWindow *window = [event window];
-                                // TODO : proper buffer resize here!
-                                [window toggleFullScreen:0];
-                            }
+                            key->keycode = 13; 
+                        }
+
+                        else if(key_code == kVK_Space)
+                        {
+                            key->keycode = ' '; 
                         }
                     }
                 }break;
@@ -378,7 +897,7 @@ macos_handle_event(NSApplication *app, NSWindow *window, platform_input *input)
                 default:
                 {
                     [app sendEvent : event];
-                }
+                };
             }
         }
         else
@@ -417,35 +936,26 @@ struct bmp_file_header
 #pragma pack(pop)
 
 internal 
-PLATFORM_READ_FILE_WITH_EXTRA_MEMORY(debug_macos_read_file_with_extra_memory)
+PLATFORM_READ_FILE_FOR_EDITOR(debug_macos_read_file_for_editor)
 {
-    platform_read_file_with_extra_memory_result result = {};
+    platform_read_source_file_result result = {};
 
     // TODO(joon) Research more about the options for more smoooooth experience
     int file = open(file_name, O_RDWR, S_IRWXU);
     int error = errno;
     if(file >= 0) // NOTE(joon) If the open() succeded, the return value is non-negative value.
     {
-        struct stat file_stat;
-        fstat(file , &file_stat); 
-        off_t file_size = file_stat.st_size;
-
-        if(file_size > 0)
+        if(read(file, dest, size) == -1)
         {
-            // TODO/Joon : no more os level memory allocation?
-            // TODO(joon): how much extra bytes? What should happen if the file size is really big?
-            result.size = 2.0f*file_size;
-            result.memory = (u8 *)malloc(result.size);
-            zero_memory(result.memory, result.size);
-
-            if(read(file, result.memory, file_size) == -1)
-            {
-                free(result.memory);
-                result.size = 0;
-            }
+            // TODO(joon) What should we do here???
+            assert(0);
         }
 
         close(file);
+    }
+    else
+    {
+        assert(0);
     }
 
     return result;
@@ -469,10 +979,16 @@ macos_resize_window(offscreen_buffer *offscreen_buffer, u32 width, u32 height)
 int 
 main(void)
 { 
+    // TODO(joon): Build this on our own, using _NSGetExecutablePath
+    char *temp_lib_path = "/Volumes/meka/mek_editor/build/mek_editor.app/Contents/Resources/mek_editor_temp.dylib";
+    char *lib_path = "/Volumes/meka/mek_editor/build/mek_editor.app/Contents/Resources/mek_editor.dylib";
+    char *lock_path = "/Volumes/meka/mek_editor/build/mek_editor.app/Contents/Resources/mek_editor.lock";
+
     platform_api platform_api = {};
     platform_api.read_file = debug_macos_read_file;
     platform_api.write_entire_file = debug_macos_write_entire_file;
-    platform_api.read_file_with_extra_memory = debug_macos_read_file_with_extra_memory;
+    platform_api.read_source_file = debug_macos_read_file_for_editor;
+    platform_api.get_file_size = macos_get_file_size;
     srand((u32)time(NULL));
 
     struct mach_timebase_info mach_time_info;
@@ -498,15 +1014,14 @@ main(void)
                 total_size, 
                 VM_FLAGS_ANYWHERE);
 
-    u32 target_frames_per_second = 30;
+    u32 target_frames_per_second = 60;
     r32 target_seconds_per_frame = 1.0f/(r32)target_frames_per_second;
-    u32 target_nano_seconds_per_frame = (u32)(target_seconds_per_frame*sec_to_nano_sec);
+    u32 target_nano_seconds_per_frame = (u32)(target_seconds_per_frame*Sec_To_Nano_Sec);
 
     platform_memory.transient_memory = (u8 *)platform_memory.permanent_memory + platform_memory.permanent_memory_size;
 
-    //macos_code code = {};
-    //macos_get_code(code, "/Volumes/meka/mek_editor/data/test.bmp");
-
+    macos_code code = {};
+    macos_get_code(&code, lib_path, temp_lib_path);
 
 #if 0
     u32 result_bitmap_size = sizeof(bmp_file_header) + 
@@ -566,6 +1081,7 @@ main(void)
     NSMenuItem *menu_item_with_item_name = [NSMenuItem new];
     [app_main_menu addItem : menu_item_with_item_name];
     [NSApp setMainMenu:app_main_menu];
+
 
     NSMenu *SubMenuOfMenuItemWithAppName = [NSMenu alloc];
     NSMenuItem *quitMenuItem = [[NSMenuItem alloc] initWithTitle:@"Quit" 
@@ -640,19 +1156,32 @@ main(void)
     [app activateIgnoringOtherApps:YES];
     [app run];
 
-    editor_state editor_state = {};
-
-    u64 last_time = mach_absolute_time();
-    is_running = true;
-
+    b32 *is_running = (b32 *)platform_memory.transient_memory;
+    *is_running = true;
     // TODO(joon) works for now, but might need more robust input system
     platform_input input = {};
-    while(is_running)
+    input.dt = target_seconds_per_frame;
+
+    u64 last_time = mach_absolute_time();
+    while(*is_running)
     {
         macos_handle_event(app, window, &input);
 
-        //if(code->file_name)
-        update_and_render(&platform_memory, &offscreen_buffer, &platform_api, &input);
+        int lock = open(lock_path, O_RDONLY);
+        if(lock < 0) // if lock does not exist
+        {
+            u64 lib_time = macos_get_file_last_modified_time(lib_path);
+            if(lib_time > code.last_modified_time)
+            {
+                macos_get_code(&code, lib_path, temp_lib_path);
+            }
+            close(lock);
+        }
+
+        if(code.update_and_render)
+        {
+            code.update_and_render(&platform_memory, &offscreen_buffer, &platform_api, &input);
+        }
 
         // NOTE(joon) update the output buffer with offscreen buffer
         MTLRegion region = 
@@ -676,6 +1205,7 @@ main(void)
             viewport.height = (r32)window_height;
             viewport.znear = 0.0;
             viewport.zfar = 1.0;
+            
 
             // NOTE(joon): renderpass descriptor is already configured for this frame, obtain it as late as possible
             MTLRenderPassDescriptor *this_frame_descriptor = view.currentRenderPassDescriptor;
@@ -745,7 +1275,7 @@ main(void)
                 u64 time_passed = mach_time_diff_in_nano_seconds(last_time, time_before_presenting, nano_seconds_per_tick);
                 u64 time_left_until_present_in_nano_seconds = target_nano_seconds_per_frame - time_passed;
                                                             
-                double time_left_until_present_in_sec = time_left_until_present_in_nano_seconds/(double)sec_to_nano_sec;
+                double time_left_until_present_in_sec = time_left_until_present_in_nano_seconds/(double)Sec_To_Nano_Sec;
 #endif
 
                 // NOTE(joon): This will work find, as long as we match our display refresh rate with our game
@@ -755,6 +1285,16 @@ main(void)
             // NOTE : equivalent to vkQueueSubmit,
             // TODO(joon): Sync with the swap buffer!
             [command_buffer commit];
+        }
+
+        // clear input
+        // TODO(joon) any way to remove thsi clear input?
+        for(u32 virtual_key_index = 0;
+                virtual_key_index < array_count(input.virtual_keys);
+                ++virtual_key_index)
+        {
+            input.virtual_keys[virtual_key_index].state_change_count = 0;
+            input.virtual_keys[virtual_key_index].time_passed += target_seconds_per_frame;
         }
 
         u64 time_passed_in_nano_seconds = mach_time_diff_in_nano_seconds(last_time, mach_absolute_time(), nano_seconds_per_tick);
@@ -781,6 +1321,8 @@ main(void)
         {
             time_passed_in_nano_seconds = mach_time_diff_in_nano_seconds(last_time, mach_absolute_time(), nano_seconds_per_tick);
         }
+
+        printf("fps: %.6f\n", mach_time_diff_in_nano_seconds(last_time, mach_absolute_time(), nano_seconds_per_tick) /  Sec_To_Nano_Sec);
 
         // update the time stamp
         last_time = mach_absolute_time();
